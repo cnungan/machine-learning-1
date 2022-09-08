@@ -1,0 +1,258 @@
+---
+title: 'Maximizing Future Bookings: An Online Communication Strategy with Machine
+  Learning'
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+
+### Introduction
+
+#### In this analysis, our aim is to understand how a hotel should respond to customer reviews to maximize future bookings from other potential guests reading the dialogue.
+
+Analyzing booking data for the past 4 years, our main areas of analyses were:
+*Which variables are the most significant in determining number of future bookings?
+*Which variables are not significant in determining the number of future bookings?
+*Based on this understanding, what webcare strategies can a hotel employ to increase the number of future bookings?
+
+***
+
+### Section 1: Installing Packages, Loading Libraries and Raw Data
+
+```{r message=FALSE, warning=FALSE, include=FALSE, results='hide'}
+#install.packages("tidyverse")
+#install.packages("psych")
+#install.packages("glmnet")
+#install.packages("car")
+#install.packages("lmtest")
+
+library("lmtest")
+library("glmnet")
+library("car")
+library("psych")
+library("tidyverse")
+library("dplyr")
+library("car")
+
+setwd("C:/Users/knowhow/Documents/northwestern/Dersler/Spring 21/Machine Learning 1")
+web <- read.csv("webcare.csv", header = T)
+```
+
+
+```{r}
+
+dim(web)
+drops <- c("X","ota")
+web2 = web[ , !(names(web) %in% drops)]
+names(web2)
+```
+
+### Section 2: Summary Statistics and Combining Variables
+
+```{r}
+summary(web2)
+
+hist(web2$tailor)
+cor(select(web2, signame:sigstaff))
+
+cor(select(web2, tailor:personalize))
+```
+
+#### Factor Analysis to see the related variables
+
+##### Initial extraction
+```{r}
+pcfit2 <- factanal(select(web2, tailor:personalize), 2, rotation="varimax")
+print(pcfit2)
+```
+
+##### Determine the number of factors
+
+###### Scree Plot
+```{r}
+## Create a correlation matrix for scree plot
+corMatrix2 <- cor(dplyr::select(web2, tailor:personalize))
+```
+
+
+```{r}
+## Calculate the Eigen values for the variables 
+A2 <- eigen(corMatrix2)
+EV2 <- A2$values
+
+## Ploting scree plot and adding lines
+plot(EV2, main = "Scree Plot", xlab = "Factors", ylab = "Eigen Values", pch = 20, col = "blue")
+lines(EV2, col = "red")
+abline(h = 1, col = "green", lty = 2)
+```
+
+Combining highly correlated binary variables by averaging - so that the Variance Inflation Factor is kept under control.  
+```{r}
+web2$sigdept_stf = (web2$sigdepart+web2$sigstaff)/2
+web2$sigman_name = (web2$sigmanager+web2$signame)/2
+
+web2$tep = (web2$tailor + web2$explain + web2$personalize)/3 
+web2$ig = (web2$invitecont + web2$gratitude)/2
+```
+
+Correlation of Dependent Variable (nextbook) with other variables
+```{r}
+
+cor(web2)[,2]
+```
+***
+
+### Section 3: Regression Models
+
+#### A) Poisson Regression with All Variables
+
+```{r}
+#Poisson with all variables
+poi = glm(nextbook ~ logbook + time + volume + respond + factor(hotel_id)
+          + tailor + defensive + invitecont + explain + nonverbal 
+          + apology + compensate + chanchange + gratitude + info 
+          + personalize + sigdepart + sigstaff+ sigmanager + signame + sighotel , family=poisson, data=web2)
+print(summary(poi))
+vif(poi)
+
+drop1(poi)
+plot(poi)
+
+
+print(logLik(poi))
+lrtest(poi)
+plot(poi)
+yhat = predict(poi, web2)
+poi_mse = mean((web2$nextbook - yhat)^2)
+poi_mse
+```
+
+The overall model is significant, however there are a few variables that are not significant.
+Diagnostic plots show:
+* Residual Plot: Clear Clusters
+* QQ Plot: Non-Normal Errors
+* Residual vs Leverage Plot: Presence of Influential Observations
+
+
+
+```{r}
+#Delete high leverage observations form the raw data
+temp_data <- data.frame(web2, hatvalues(poi))
+
+#Delete the observations whose leverage values > 2(k+1)/n
+cut_hat = 2*(28+1)/1144
+out_data <- subset(temp_data, hatvalues(poi)<= cut_hat)
+str(out_data)
+web2 <- out_data[,-28]
+str(web2)
+
+#Estimate the same model using the new dataset
+poi_alt = glm(nextbook ~ logbook + time + volume + respond + factor(hotel_id)
+              + tailor + defensive + invitecont + explain + nonverbal 
+              + apology + compensate + chanchange + gratitude + info 
+              + personalize + sigdepart + sigstaff+ sigmanager + signame + sighotel,family=poisson, data=web2)
+print(summary(poi_alt))
+vif(poi_alt)
+
+plot(poi_alt)
+```
+
+#### B) Poisson Regression with Combined Variables
+```{r}
+poi2 = glm(nextbook ~ logbook + time + volume + respond + factor(hotel_id)
+           + tep + defensive + invitecont + nonverbal 
+           + apology + compensate + chanchange + ig + info 
+           + sigdept_stf + sigman_name + sighotel , family=poisson, data=web2)
+print(summary(poi2))
+vif(poi2)
+
+print(logLik(poi2))
+lrtest(poi2)
+
+yhat2 = predict(poi2, web2)
+poi2_mse = mean((web2$nextbook - yhat2)^2)
+poi2_mse
+```
+
+#### C) Stepwise with All Variables
+
+```{r}
+# STEPWISE all variables
+
+stepfit = step(poi_alt)
+summary(stepfit)
+vif(stepfit)
+
+print(logLik(stepfit))
+lrtest(stepfit)
+plot(stepfit)
+
+yhat3 = predict(stepfit, web2)
+step_mse = mean((web2$nextbook - yhat3)^2)
+step_mse
+```
+
+#### D) Stepwise with Combined Variables
+
+```{r}
+# STEPWISE combined variables
+
+stepfit2 = step(poi2)
+summary(stepfit2)
+vif(stepfit2)
+
+print(logLik(stepfit2))
+lrtest(stepfit2)
+
+yhat4 = predict(stepfit2, web2)
+step2_mse = mean((web2$nextbook - yhat4)^2)
+step2_mse
+```
+
+#### E) Ridge Regression
+
+```{r}
+#RIDGE REGRESSION
+
+X = model.matrix(nextbook ~ logbook + time + volume + respond + factor(hotel_id)
+                 + tailor + defensive + invitecont + explain + nonverbal 
+                 + apology + compensate + chanchange + gratitude + info 
+                 + personalize + sigdepart + sigstaff+ sigmanager + signame + sighotel+tep+ig, web2)
+
+fitridge = glmnet(X, web2$nextbook, alpha=0, family = "poisson")
+print(fitridge$lambda.min)
+plot(fitridge,xvar="lambda")
+fitridge2 = cv.glmnet(X, web2$nextbook, alpha=0,
+                      lambda=exp(seq(-1,5,length=50)))
+plot(fitridge2)
+fitridge2$lambda.min
+
+mse.min_ridge <- fitridge2$cvm[fitridge2$lambda == fitridge2$lambda.min]
+mse.min_ridge
+
+
+coef(fitridge2)
+attributes(fitridge2)
+```
+
+#### F) LASSO
+
+```{r}
+#LASSO 
+
+fitlasso = glmnet(X, web2$nextbook, alpha=1, family="poisson")
+plot(fitlasso, xvar = "lambda")
+fitlasso2 = cv.glmnet(X, web2$nextbook, alpha=1, family="poisson")
+
+print(fitlasso2$lambda.min)
+
+
+mse.min_lasso <- fitlasso2$cvm[fitlasso2$lambda == fitlasso2$lambda.min]
+mse.min_lasso
+
+round(predict(fitlasso2, s=fitlasso2$lambda.min, type="coefficients")[1:29,], 4)
+
+```
+
