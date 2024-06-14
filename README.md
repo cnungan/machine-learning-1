@@ -1,1 +1,1 @@
-Developing response strategy to hotel reviews to increase future bookings.
+This group project was a part of Machine Learning 1 course at Northwestern University, Integrated Marketing Communications Master's Program. We developed and refined a machine learning model that informs the communications strategy of a hotel. By finding the most important variables in crafting a response to guest reviews, we aimed to recommend a strategy that would maximize future bookings.
